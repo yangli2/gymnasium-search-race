@@ -44,6 +44,7 @@ class SearchRaceEnv(gym.Env):
         car_max_thrust: float = 200,
         test_id: int | None = None,
         sequential_maps: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         self.laps = laps
         self.car_max_thrust = car_max_thrust
@@ -77,6 +78,9 @@ class SearchRaceEnv(gym.Env):
         self.test_checkpoints = self._get_test_checkpoints()
         self.test_id = test_id
         self.sequential_maps = sequential_maps
+        # If true, will not have the second checkpoint out during the first lap.
+        self.discover_checkpoints = discover_checkpoints
+
         self.test_index = -1
 
         self.window = None
@@ -131,12 +135,26 @@ class SearchRaceEnv(gym.Env):
     def _get_obs(self) -> ObsType:
         obs = []
 
-        # position and angle of the next 2 checkpoints relative to the car
-        for i in range(2):
-            x_cp, y_cp = self.checkpoints[
-                (self.car.current_checkpoint + i + 1) % len(self.checkpoints)
+        # position and angle of the next checkpoints relative to the car
+        next_cp_x, next_cp_y = self.checkpoints[
+            (self.car.current_checkpoint + 1) % len(self.checkpoints)
+        ]
+        next_obs = self._get_diff_obs(car=self.car, x=next_cp_x, y=next_cp_y)
+        obs.append(next_obs)
+        if self.discover_checkpoints and self.car.current_checkpoint <= len(self.checkpoints):
+            # We are still in the first lap, we should not know the coordinates of the checkpoint after the next one yet.
+            # Therefore, for our obs vector, we will just repeat the next checkpoint twice.
+            obs.append(next_obs)
+        else:
+            second_next_cp_x, second_next_cp_y = self.checkpoints[
+                (self.car.current_checkpoint + 2) % len(self.checkpoints)
             ]
-            obs.append(self._get_diff_obs(car=self.car, x=x_cp, y=y_cp))
+            second_next_obs = self._get_diff_obs(
+                car=self.car,
+                x=second_next_cp_x,
+                y=second_next_cp_y,
+            )
+            obs.append(second_next_obs)
 
         # car speed
         obs.append(self._get_speed_obs(car=self.car))
@@ -430,6 +448,7 @@ class SearchRaceDiscreteEnv(SearchRaceEnv):
         car_max_thrust: float = 200,
         test_id: int | None = None,
         sequential_maps: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         super().__init__(
             render_mode=render_mode,
@@ -437,6 +456,7 @@ class SearchRaceDiscreteEnv(SearchRaceEnv):
             car_max_thrust=car_max_thrust,
             test_id=test_id,
             sequential_maps=sequential_maps,
+            discover_checkpoints=discover_checkpoints,
         )
 
         self.actions = list(
