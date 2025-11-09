@@ -163,3 +163,5 @@ cython_debug/
 
 # rl_zoo3 Training stuff
 logs/
+# Ephemeral video recordings
+videos/

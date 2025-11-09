@@ -151,12 +151,26 @@ class MadPodRacingEnv(SearchRaceEnv):
         car = self.cars[car_index]
         obs = []
 
-        # position and angle of the next 2 checkpoints relative to the car
-        for i in range(2):
-            x_cp, y_cp = self.checkpoints[
-                (car.current_checkpoint + i + 1) % len(self.checkpoints)
+        # position and angle of the next checkpoints relative to the car
+        next_cp_x, next_cp_y = self.checkpoints[
+            (car.current_checkpoint + 1) % len(self.checkpoints)
+        ]
+        next_obs = self._get_diff_obs(car=car, x=next_cp_x, y=next_cp_y)
+        obs.append(next_obs)
+        if self.discover_checkpoints and car.current_checkpoint <= len(self.checkpoints):
+            # We are still in the first lap, we should not know the coordinates of the checkpoint after the next one yet.
+            # Therefore, for our obs vector, we will just repeat the next checkpoint twice.
+            obs.append(next_obs)
+        else:
+            second_next_cp_x, second_next_cp_y = self.checkpoints[
+                (car.current_checkpoint + 2) % len(self.checkpoints)
             ]
-            obs.append(self._get_diff_obs(car=car, x=x_cp, y=y_cp))
+            second_next_obs = self._get_diff_obs(
+                car=car,
+                x=second_next_cp_x,
+                y=second_next_cp_y,
+            )
+            obs.append(second_next_obs)
 
         # car speed
         obs.append(self._get_speed_obs(car=car))
