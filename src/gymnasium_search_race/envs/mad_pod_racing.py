@@ -116,6 +116,7 @@ class MadPodRacingEnv(SearchRaceEnv):
         opponent_path: str | Path | None = None,
         boost_on_first_move: bool = False,
         boost_opponent_on_first_move: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         super().__init__(
             render_mode=render_mode,
@@ -123,6 +124,7 @@ class MadPodRacingEnv(SearchRaceEnv):
             car_max_thrust=car_max_thrust,
             test_id=test_id,
             sequential_maps=sequential_maps,
+            discover_checkpoints=discover_checkpoints,
         )
         self.car_radius = 400
         self.min_impulse = 120.0
@@ -367,6 +369,7 @@ class MadPodRacingBlockerEnv(MadPodRacingEnv):
         sequential_maps: bool = False,
         boost_on_first_move: bool = False,
         boost_opponent_on_first_move: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         super().__init__(
             render_mode=render_mode,
@@ -377,6 +380,7 @@ class MadPodRacingBlockerEnv(MadPodRacingEnv):
             sequential_maps=sequential_maps,
             boost_on_first_move=boost_on_first_move,
             boost_opponent_on_first_move=boost_opponent_on_first_move,
+            discover_checkpoints=discover_checkpoints,
         )
 
         # opponent runner observation, blocker car
@@ -411,6 +415,7 @@ class MadPodRacingDiscreteEnv(MadPodRacingEnv):
         opponent_path: str | Path | None = None,
         boost_on_first_move: bool = False,
         boost_opponent_on_first_move: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         super().__init__(
             render_mode=render_mode,
@@ -421,6 +426,7 @@ class MadPodRacingDiscreteEnv(MadPodRacingEnv):
             opponent_path=opponent_path,
             boost_on_first_move=boost_on_first_move,
             boost_opponent_on_first_move=boost_opponent_on_first_move,
+            discover_checkpoints=discover_checkpoints,
         )
 
         self.actions = list(
@@ -454,6 +460,7 @@ class MadPodRacingBlockerDiscreteEnv(MadPodRacingBlockerEnv):
         sequential_maps: bool = False,
         boost_on_first_move: bool = False,
         boost_opponent_on_first_move: bool = False,
+        discover_checkpoints: bool = False,
     ) -> None:
         super().__init__(
             opponent_path=opponent_path,
@@ -464,6 +471,7 @@ class MadPodRacingBlockerDiscreteEnv(MadPodRacingBlockerEnv):
             sequential_maps=sequential_maps,
             boost_on_first_move=boost_on_first_move,
             boost_opponent_on_first_move=boost_opponent_on_first_move,
+            discover_checkpoints=discover_checkpoints,
         )
 
         self.actions = list(
