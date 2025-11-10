@@ -12,7 +12,6 @@ def record_video(
     opponent_path: str | None = None,
     env_kwargs: dict | None = None,
 ) -> None:
-  print(f'env_kwargs: {env_kwargs}')
   env = gym.make(
       env_id,
       opponent_path=opponent_path,
