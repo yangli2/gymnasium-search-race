@@ -1,15 +1,14 @@
-import json
 from dataclasses import asdict
 from itertools import product
+import json
 from pathlib import Path
 from typing import Any, SupportsFloat
 
 import gymnasium as gym
-import numpy as np
-import pygame
 from gymnasium import spaces
 from gymnasium.core import ActType, ObsType, RenderFrame
-
+import numpy as np
+import pygame
 from gymnasium_search_race.envs.models import Car, Point
 
 SCALE_FACTOR = 20
@@ -25,455 +24,479 @@ MAPS_PATH = ROOT_PATH / "maps"
 
 
 def get_test_ids() -> list[int]:
-    return sorted(int(path.stem.replace("test", "")) for path in MAPS_PATH.iterdir())
+  return sorted(
+      int(path.stem.replace("test", "")) for path in MAPS_PATH.iterdir()
+  )
 
 
 def clockwise_rotation_matrix(angle: float) -> np.ndarray:
-    # https://en.wikipedia.org/wiki/Rotation_matrix#Direction
-    c, s = np.cos(angle), np.sin(angle)
-    return np.array([[c, s], [-s, c]])
+  # https://en.wikipedia.org/wiki/Rotation_matrix#Direction
+  c, s = np.cos(angle), np.sin(angle)
+  return np.array([[c, s], [-s, c]])
 
 
 class SearchRaceEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
+  metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
 
-    def __init__(
-        self,
-        render_mode: str | None = None,
-        laps: int = 3,
-        car_max_thrust: float = 200,
-        test_id: int | None = None,
-        sequential_maps: bool = False,
-        discover_checkpoints: bool = False,
-    ) -> None:
-        self.laps = laps
-        self.car_max_thrust = car_max_thrust
-        self.width = 16000
-        self.height = 9000
-        self.checkpoint_radius = 600
-        self.max_rotation_per_turn = 18
-        self.car_friction = 0.15
+  def __init__(
+      self,
+      render_mode: str | None = None,
+      laps: int = 3,
+      car_max_thrust: float = 200,
+      test_id: int | None = None,
+      sequential_maps: bool = False,
+      discover_checkpoints: bool = True,
+  ) -> None:
+    self.laps = laps
+    self.car_max_thrust = car_max_thrust
+    self.width = 16000
+    self.height = 9000
+    self.checkpoint_radius = 600
+    self.max_rotation_per_turn = 18
+    self.car_friction = 0.15
 
-        self.distance_upper_bound = np.linalg.norm([self.width, self.height])
-        self.car_thrust_upper_bound = car_max_thrust * 10
+    self.distance_upper_bound = np.linalg.norm([self.width, self.height])
+    self.car_thrust_upper_bound = car_max_thrust * 10
 
-        self.observation_space = spaces.Box(
-            low=-1,
-            high=1,
-            shape=(10,),
-            dtype=np.float64,
-        )
+    self.observation_space = spaces.Box(
+        low=-1,
+        high=1,
+        shape=(10,),
+        dtype=np.float64,
+    )
 
-        # rotation angle, thrust
-        self.action_space = spaces.Box(
-            low=np.array([-1, 0]),
-            high=np.array([1, 1]),
-            dtype=np.float64,
-        )
+    # rotation angle, thrust
+    self.action_space = spaces.Box(
+        low=np.array([-1, 0]),
+        high=np.array([1, 1]),
+        dtype=np.float64,
+    )
 
-        assert render_mode is None or render_mode in self.metadata["render_modes"]
-        self.render_mode = render_mode
+    assert render_mode is None or render_mode in self.metadata["render_modes"]
+    self.render_mode = render_mode
 
-        self.test_ids = self._get_test_ids()
-        self.test_checkpoints = self._get_test_checkpoints()
-        self.test_id = test_id
-        self.sequential_maps = sequential_maps
-        # If true, will not have the second checkpoint out during the first lap.
-        self.discover_checkpoints = discover_checkpoints
+    self.test_ids = self._get_test_ids()
+    self.test_checkpoints = self._get_test_checkpoints()
+    self.test_id = test_id
+    self.sequential_maps = sequential_maps
+    # If true, will not have the second checkpoint out during the first lap.
+    self.discover_checkpoints = discover_checkpoints
 
-        self.test_index = -1
+    self.test_index = -1
 
-        self.window = None
-        self.clock = None
-        self.font = None
-        self.background_img = None
-        self.background_img_path = ASSETS_PATH / "back.jpg"
-        self.car_img = None
-        self.car_img_path = ASSETS_PATH / "car.png"
+    self.window = None
+    self.clock = None
+    self.font = None
+    self.background_img = None
+    self.background_img_path = ASSETS_PATH / "back.jpg"
+    self.car_img = None
+    self.car_img_path = ASSETS_PATH / "car.png"
 
-    def _get_test_ids(self) -> list[int]:
-        return get_test_ids()
+  def _get_test_ids(self) -> list[int]:
+    return get_test_ids()
 
-    def _get_test_checkpoints(self) -> list[np.ndarray]:
-        checkpoints = []
+  def _get_test_checkpoints(self) -> list[np.ndarray]:
+    checkpoints = []
 
-        for test_id in self._get_test_ids():
-            test_map_path = MAPS_PATH / f"test{test_id}.json"
-            test_map = json.loads(test_map_path.read_text(encoding="UTF-8"))
-            checkpoints.append(
-                np.array(
-                    [
-                        [int(i) for i in checkpoint.split()]
-                        for checkpoint in test_map["testIn"].split(";")
-                    ],
-                    dtype=self.observation_space.dtype,
-                )
+    for test_id in self._get_test_ids():
+      test_map_path = MAPS_PATH / f"test{test_id}.json"
+      test_map = json.loads(test_map_path.read_text(encoding="UTF-8"))
+      checkpoints.append(
+          np.array(
+              [
+                  [int(i) for i in checkpoint.split()]
+                  for checkpoint in test_map["testIn"].split(";")
+              ],
+              dtype=self.observation_space.dtype,
+          )
+      )
+
+    return checkpoints
+
+  def _get_diff_obs(self, car: Car, x: float, y: float) -> ObsType:
+    r = clockwise_rotation_matrix(car.radians())
+    dx, dy = r @ [x - car.x, y - car.y]
+    relative_angle = (np.arctan2(dy, dx) + np.pi) % (2 * np.pi) - np.pi
+    return np.clip(
+        [
+            dx / self.distance_upper_bound,
+            dy / self.distance_upper_bound,
+            np.sin(relative_angle),
+            np.cos(relative_angle),
+        ],
+        -1.0,
+        1.0,
+    )
+
+  def _get_speed_obs(self, car: Car) -> ObsType:
+    r = clockwise_rotation_matrix(car.radians())
+    relative_speed = r @ [car.vx, car.vy]
+    return np.clip(relative_speed / self.car_thrust_upper_bound, -1.0, 1.0)
+
+  def _get_obs(self) -> ObsType:
+    obs = []
+
+    # position and angle of the next checkpoints relative to the car
+    next_cp_x, next_cp_y = self.checkpoints[
+        (self.car.current_checkpoint + 1) % len(self.checkpoints)
+    ]
+    next_obs = self._get_diff_obs(car=self.car, x=next_cp_x, y=next_cp_y)
+    obs.append(next_obs)
+    if self.discover_checkpoints and self.car.current_checkpoint <= len(
+        self.checkpoints
+    ):
+      # We are still in the first lap, we should not know the coordinates of the checkpoint after the next one yet.
+      # Therefore, for our obs vector, we will just repeat the next checkpoint twice.
+      obs.append(next_obs)
+    else:
+      second_next_cp_x, second_next_cp_y = self.checkpoints[
+          (self.car.current_checkpoint + 2) % len(self.checkpoints)
+      ]
+      second_next_obs = self._get_diff_obs(
+          car=self.car,
+          x=second_next_cp_x,
+          y=second_next_cp_y,
+      )
+      obs.append(second_next_obs)
+
+    # car speed
+    obs.append(self._get_speed_obs(car=self.car))
+
+    return np.concatenate(obs).astype(self.observation_space.dtype)
+
+  def _get_terminated(self) -> bool:
+    return self.car.current_checkpoint >= self.total_checkpoints
+
+  def _get_info(self) -> dict[str, Any]:
+    return {
+        "width": self.width,
+        "height": self.height,
+        "x": self.car.x,
+        "y": self.car.y,
+        "vx": self.car.vx,
+        "vy": self.car.vy,
+        "angle": self.car.angle,
+        "max_rotation_per_turn": self.max_rotation_per_turn,
+        "car_max_thrust": self.car_max_thrust,
+        "distance_upper_bound": self.distance_upper_bound,
+        "car_thrust_upper_bound": self.car_thrust_upper_bound,
+        "checkpoints": self.checkpoints,
+        "total_checkpoints": self.total_checkpoints,
+        "current_checkpoint": self.car.current_checkpoint,
+        "episode_length": self.episode_length,
+    }
+
+  def _generate_checkpoints(
+      self,
+      options: dict[str, Any] | None = None,
+  ) -> np.ndarray:
+    test_id = (
+        self.test_id
+        if options is None or "test_id" not in options
+        else options["test_id"]
+    )
+
+    if test_id is not None:
+      self.test_index = self.test_ids.index(test_id)
+    elif self.sequential_maps:
+      self.test_index = (self.test_index + 1) % len(self.test_ids)
+    else:
+      self.test_index = self.np_random.choice(len(self.test_ids))
+
+    return self.test_checkpoints[self.test_index]
+
+  def _generate_car(self) -> None:
+    self.car = Car(
+        x=self.checkpoints[0][0],
+        y=self.checkpoints[0][1],
+    )
+    self.car.angle = self.car.get_angle(
+        x=self.checkpoints[1][0],
+        y=self.checkpoints[1][1],
+    )
+
+  def _adjust_car(self) -> None:
+    self.car.truncate_position()
+    self.car.round_angle()
+    self.car.truncate_speed(friction=self.car_friction)
+
+  def reset(
+      self,
+      *,
+      seed: int | None = None,
+      options: dict[str, Any] | None = None,
+  ) -> tuple[ObsType, dict[str, Any]]:
+    super().reset(seed=seed, options=options)
+
+    self.episode_length = 0
+    self.checkpoints = self._generate_checkpoints(options=options)
+    self.total_checkpoints = len(self.checkpoints) * self.laps
+    self._generate_car()
+    self._adjust_car()
+
+    observation = self._get_obs()
+    info = self._get_info()
+
+    if self.render_mode == "human":
+      self._render_frame()
+
+    return observation, info
+
+  def _convert_action_to_angle_thrust(
+      self,
+      action: ActType,
+  ) -> tuple[float, float]:
+    angle, thrust = action
+    assert -1.0 <= angle <= 1.0
+    assert 0.0 <= thrust <= 1.0
+
+    angle = np.rint(angle * self.max_rotation_per_turn)
+    thrust = np.rint(thrust * self.car_max_thrust)
+
+    return angle, thrust
+
+  def _apply_angle_thrust(self, angle: float, thrust: float) -> None:
+    self.car.rotate(angle=angle)
+    self.car.thrust_towards_heading(thrust=thrust)
+
+  def _get_next_checkpoint_index(self) -> int:
+    return (self.car.current_checkpoint + 1) % len(self.checkpoints)
+
+  def _move_car(self) -> SupportsFloat:
+    reward = -0.1
+    checkpoint_index = self._get_next_checkpoint_index()
+
+    self.car.move(t=1.0)
+    if (
+        self.car.distance(
+            Point(
+                x=self.checkpoints[checkpoint_index][0],
+                y=self.checkpoints[checkpoint_index][1],
             )
-
-        return checkpoints
-
-    def _get_diff_obs(self, car: Car, x: float, y: float) -> ObsType:
-        r = clockwise_rotation_matrix(car.radians())
-        dx, dy = r @ [x - car.x, y - car.y]
-        relative_angle = (np.arctan2(dy, dx) + np.pi) % (2 * np.pi) - np.pi
-        return np.clip(
-            [
-                dx / self.distance_upper_bound,
-                dy / self.distance_upper_bound,
-                np.sin(relative_angle),
-                np.cos(relative_angle),
-            ],
-            -1.0,
-            1.0,
         )
+        <= self.checkpoint_radius
+    ):
+      self.car.current_checkpoint += 1
+      reward += 1
 
-    def _get_speed_obs(self, car: Car) -> ObsType:
-        r = clockwise_rotation_matrix(car.radians())
-        relative_speed = r @ [car.vx, car.vy]
-        return np.clip(relative_speed / self.car_thrust_upper_bound, -1.0, 1.0)
+    return reward
 
-    def _get_obs(self) -> ObsType:
-        obs = []
+  def step(
+      self,
+      action: ActType,
+  ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+    assert self.action_space.contains(
+        action
+    ), f"{action!r} ({type(action)}) invalid"
 
-        # position and angle of the next checkpoints relative to the car
-        next_cp_x, next_cp_y = self.checkpoints[
-            (self.car.current_checkpoint + 1) % len(self.checkpoints)
-        ]
-        next_obs = self._get_diff_obs(car=self.car, x=next_cp_x, y=next_cp_y)
-        obs.append(next_obs)
-        if self.discover_checkpoints and self.car.current_checkpoint <= len(self.checkpoints):
-            # We are still in the first lap, we should not know the coordinates of the checkpoint after the next one yet.
-            # Therefore, for our obs vector, we will just repeat the next checkpoint twice.
-            obs.append(next_obs)
-        else:
-            second_next_cp_x, second_next_cp_y = self.checkpoints[
-                (self.car.current_checkpoint + 2) % len(self.checkpoints)
-            ]
-            second_next_obs = self._get_diff_obs(
-                car=self.car,
-                x=second_next_cp_x,
-                y=second_next_cp_y,
-            )
-            obs.append(second_next_obs)
+    angle, thrust = self._convert_action_to_angle_thrust(action=action)
 
-        # car speed
-        obs.append(self._get_speed_obs(car=self.car))
+    self._apply_angle_thrust(angle=angle, thrust=thrust)
+    reward = self._move_car()
+    self._adjust_car()
+    self.episode_length += 1
 
-        return np.concatenate(obs).astype(self.observation_space.dtype)
+    observation = self._get_obs()
+    terminated = self._get_terminated()
+    info = self._get_info()
 
-    def _get_terminated(self) -> bool:
-        return self.car.current_checkpoint >= self.total_checkpoints
+    if self.render_mode == "human":
+      self._render_frame()
 
-    def _get_info(self) -> dict[str, Any]:
-        return {
-            "width": self.width,
-            "height": self.height,
-            "x": self.car.x,
-            "y": self.car.y,
-            "vx": self.car.vx,
-            "vy": self.car.vy,
-            "angle": self.car.angle,
-            "max_rotation_per_turn": self.max_rotation_per_turn,
-            "car_max_thrust": self.car_max_thrust,
-            "distance_upper_bound": self.distance_upper_bound,
-            "car_thrust_upper_bound": self.car_thrust_upper_bound,
-            "checkpoints": self.checkpoints,
-            "total_checkpoints": self.total_checkpoints,
-            "current_checkpoint": self.car.current_checkpoint,
-            "episode_length": self.episode_length,
-        }
+    return observation, reward, terminated, False, info
 
-    def _generate_checkpoints(
-        self,
-        options: dict[str, Any] | None = None,
-    ) -> np.ndarray:
-        test_id = (
-            self.test_id
-            if options is None or "test_id" not in options
-            else options["test_id"]
-        )
+  def render(self) -> RenderFrame | list[RenderFrame] | None:
+    if self.render_mode == "rgb_array":
+      return self._render_frame()
 
-        if test_id is not None:
-            self.test_index = self.test_ids.index(test_id)
-        elif self.sequential_maps:
-            self.test_index = (self.test_index + 1) % len(self.test_ids)
-        else:
-            self.test_index = self.np_random.choice(len(self.test_ids))
+  @staticmethod
+  def _load_img(filename: str | Path, width: int) -> pygame.Surface:
+    try:
+      img = pygame.image.load(filename)
+    except pygame.error as e:
+      print(
+          f"Warning: pygame failed to load image {filename} due to: {e}."
+          " Creating solid color placeholder."
+      )
+      scaled_width = max(1, int(width / SCALE_FACTOR))
+      if "back" in str(filename) or "background" in str(filename):
+        scaled_height = max(1, int(scaled_width * 9 / 16))
+        img = pygame.Surface((scaled_width, scaled_height))
+        img.fill((30, 50, 30))  # Dark green forest background
+      else:
+        img = pygame.Surface((scaled_width, scaled_width))
+        img.fill((200, 50, 50))  # Red pod
+      return img
 
-        return self.test_checkpoints[self.test_index]
+    return pygame.transform.scale_by(
+        img, (width / SCALE_FACTOR) / img.get_width()
+    )
 
-    def _generate_car(self) -> None:
-        self.car = Car(
-            x=self.checkpoints[0][0],
-            y=self.checkpoints[0][1],
-        )
-        self.car.angle = self.car.get_angle(
-            x=self.checkpoints[1][0],
-            y=self.checkpoints[1][1],
-        )
+  def _load_background_img(self) -> None:
+    self.background_img = self._load_img(
+        filename=self.background_img_path,
+        width=self.width,
+    )
 
-    def _adjust_car(self) -> None:
-        self.car.truncate_position()
-        self.car.round_angle()
-        self.car.truncate_speed(friction=self.car_friction)
+  def _load_car_img(self) -> None:
+    self.car_img = self._load_img(
+        filename=self.car_img_path,
+        width=self.checkpoint_radius,
+    )
 
-    def reset(
-        self,
-        *,
-        seed: int | None = None,
-        options: dict[str, Any] | None = None,
-    ) -> tuple[ObsType, dict[str, Any]]:
-        super().reset(seed=seed, options=options)
+  def _draw_checkpoints(self, canvas: pygame.Surface) -> None:
+    next_checkpoint_index = self._get_next_checkpoint_index()
 
-        self.episode_length = 0
-        self.checkpoints = self._generate_checkpoints(options=options)
-        self.total_checkpoints = len(self.checkpoints) * self.laps
-        self._generate_car()
-        self._adjust_car()
+    for i, checkpoint in enumerate(self.checkpoints):
+      center = (checkpoint / SCALE_FACTOR).tolist()
+      pygame.draw.circle(
+          surface=canvas,
+          color=(
+              NEXT_CHECKPOINT_COLOR
+              if i == next_checkpoint_index
+              else CHECKPOINT_COLOR
+          ),
+          center=center,
+          radius=self.checkpoint_radius / SCALE_FACTOR,
+          width=40 // SCALE_FACTOR,
+      )
+      text_surface = self.font.render(str(i), True, FONT_COLOR)
+      canvas.blit(
+          source=text_surface,
+          dest=(
+              center[0] - text_surface.get_width() / 2,
+              center[1] - text_surface.get_height() / 2,
+          ),
+      )
 
-        observation = self._get_obs()
-        info = self._get_info()
+  def _draw_car(self, canvas: pygame.Surface) -> None:
+    assert self.car_img is not None
+    canvas.blit(
+        pygame.transform.rotate(self.car_img, angle=-self.car.angle - 90),
+        (
+            self.car.x / SCALE_FACTOR - self.car_img.get_width() / 2,
+            self.car.y / SCALE_FACTOR - self.car_img.get_height() / 2,
+        ),
+    )
 
-        if self.render_mode == "human":
-            self._render_frame()
+  def _draw_car_text(self, canvas: pygame.Surface) -> None:
+    for i, (name, value) in enumerate(asdict(self.car).items()):
+      if name == "current_checkpoint":
+        continue
 
-        return observation, info
+      text_surface = self.font.render(
+          f"{name:<6} {value:0.0f}",
+          True,
+          FONT_COLOR,
+      )
+      canvas.blit(
+          source=text_surface,
+          dest=(
+              canvas.get_width() * 0.01,
+              canvas.get_height() * 0.01 + i * self.font.get_height(),
+          ),
+      )
 
-    def _convert_action_to_angle_thrust(
-        self,
-        action: ActType,
-    ) -> tuple[float, float]:
-        angle, thrust = action
-        assert -1.0 <= angle <= 1.0
-        assert 0.0 <= thrust <= 1.0
+  def _draw_checkpoint_text(self, canvas: pygame.Surface) -> None:
+    text_surface = self.font.render(
+        f"{self._get_next_checkpoint_index()} ({self.car.current_checkpoint})",
+        True,
+        FONT_COLOR,
+    )
+    canvas.blit(
+        source=text_surface,
+        dest=(
+            canvas.get_width() * 0.99 - text_surface.get_width(),
+            canvas.get_height() * 0.01,
+        ),
+    )
 
-        angle = np.rint(angle * self.max_rotation_per_turn)
-        thrust = np.rint(thrust * self.car_max_thrust)
+  def _render_frame(self) -> RenderFrame | list[RenderFrame]:
+    window_size = self.width / SCALE_FACTOR, self.height / SCALE_FACTOR
 
-        return angle, thrust
+    if self.window is None and self.render_mode == "human":
+      pygame.init()
+      pygame.display.init()
+      self.window = pygame.display.set_mode(window_size)
+      pygame.display.set_caption("Search Race")
 
-    def _apply_angle_thrust(self, angle: float, thrust: float) -> None:
-        self.car.rotate(angle=angle)
-        self.car.thrust_towards_heading(thrust=thrust)
+    if self.clock is None and self.render_mode == "human":
+      self.clock = pygame.time.Clock()
 
-    def _get_next_checkpoint_index(self) -> int:
-        return (self.car.current_checkpoint + 1) % len(self.checkpoints)
+    if self.font is None:
+      pygame.font.init()
+      self.font = pygame.font.SysFont(
+          FONT_NAME,
+          FONT_SIZE // SCALE_FACTOR,
+          bold=True,
+      )
 
-    def _move_car(self) -> SupportsFloat:
-        reward = 0
-        checkpoint_index = self._get_next_checkpoint_index()
+    if self.background_img is None:
+      self._load_background_img()
 
-        self.car.move(t=1.0)
-        if (
-            self.car.distance(
-                Point(
-                    x=self.checkpoints[checkpoint_index][0],
-                    y=self.checkpoints[checkpoint_index][1],
-                )
-            )
-            <= self.checkpoint_radius
-        ):
-            self.car.current_checkpoint += 1
-            reward += 1
+    if self.car_img is None:
+      self._load_car_img()
 
-        return reward
+    canvas = pygame.Surface(window_size)
+    canvas.blit(self.background_img, (0, 0))
 
-    def step(
-        self,
-        action: ActType,
-    ) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
-        assert self.action_space.contains(
-            action
-        ), f"{action!r} ({type(action)}) invalid"
+    self._draw_checkpoints(canvas=canvas)
+    self._draw_car(canvas=canvas)
+    self._draw_car_text(canvas=canvas)
+    self._draw_checkpoint_text(canvas=canvas)
 
-        angle, thrust = self._convert_action_to_angle_thrust(action=action)
+    if self.render_mode == "human":
+      self.window.blit(canvas, canvas.get_rect())
+      pygame.event.pump()
+      pygame.display.update()
+      self.clock.tick(self.metadata["render_fps"])
+    else:  # rgb_array
+      return np.transpose(
+          np.array(pygame.surfarray.pixels3d(canvas)),
+          axes=(1, 0, 2),
+      )
 
-        self._apply_angle_thrust(angle=angle, thrust=thrust)
-        reward = self._move_car()
-        self._adjust_car()
-        self.episode_length += 1
-
-        observation = self._get_obs()
-        terminated = self._get_terminated()
-        info = self._get_info()
-
-        if self.render_mode == "human":
-            self._render_frame()
-
-        return observation, reward, terminated, False, info
-
-    def render(self) -> RenderFrame | list[RenderFrame] | None:
-        if self.render_mode == "rgb_array":
-            return self._render_frame()
-
-    @staticmethod
-    def _load_img(filename: str | Path, width: int) -> pygame.Surface:
-        img = pygame.image.load(filename)
-        return pygame.transform.scale_by(img, (width / SCALE_FACTOR) / img.get_width())
-
-    def _load_background_img(self) -> None:
-        self.background_img = self._load_img(
-            filename=self.background_img_path,
-            width=self.width,
-        )
-
-    def _load_car_img(self) -> None:
-        self.car_img = self._load_img(
-            filename=self.car_img_path,
-            width=self.checkpoint_radius,
-        )
-
-    def _draw_checkpoints(self, canvas: pygame.Surface) -> None:
-        next_checkpoint_index = self._get_next_checkpoint_index()
-
-        for i, checkpoint in enumerate(self.checkpoints):
-            center = (checkpoint / SCALE_FACTOR).tolist()
-            pygame.draw.circle(
-                surface=canvas,
-                color=(
-                    NEXT_CHECKPOINT_COLOR
-                    if i == next_checkpoint_index
-                    else CHECKPOINT_COLOR
-                ),
-                center=center,
-                radius=self.checkpoint_radius / SCALE_FACTOR,
-                width=40 // SCALE_FACTOR,
-            )
-            text_surface = self.font.render(str(i), True, FONT_COLOR)
-            canvas.blit(
-                source=text_surface,
-                dest=(
-                    center[0] - text_surface.get_width() / 2,
-                    center[1] - text_surface.get_height() / 2,
-                ),
-            )
-
-    def _draw_car(self, canvas: pygame.Surface) -> None:
-        canvas.blit(
-            pygame.transform.rotate(self.car_img, angle=-self.car.angle - 90),
-            (
-                self.car.x / SCALE_FACTOR - self.car_img.get_width() / 2,
-                self.car.y / SCALE_FACTOR - self.car_img.get_height() / 2,
-            ),
-        )
-
-    def _draw_car_text(self, canvas: pygame.Surface) -> None:
-        for i, (name, value) in enumerate(asdict(self.car).items()):
-            if name == "current_checkpoint":
-                continue
-
-            text_surface = self.font.render(
-                f"{name:<6} {value:0.0f}",
-                True,
-                FONT_COLOR,
-            )
-            canvas.blit(
-                source=text_surface,
-                dest=(
-                    canvas.get_width() * 0.01,
-                    canvas.get_height() * 0.01 + i * self.font.get_height(),
-                ),
-            )
-
-    def _draw_checkpoint_text(self, canvas: pygame.Surface) -> None:
-        text_surface = self.font.render(
-            f"{self._get_next_checkpoint_index()} ({self.car.current_checkpoint})",
-            True,
-            FONT_COLOR,
-        )
-        canvas.blit(
-            source=text_surface,
-            dest=(
-                canvas.get_width() * 0.99 - text_surface.get_width(),
-                canvas.get_height() * 0.01,
-            ),
-        )
-
-    def _render_frame(self) -> RenderFrame | list[RenderFrame]:
-        window_size = self.width / SCALE_FACTOR, self.height / SCALE_FACTOR
-
-        if self.window is None and self.render_mode == "human":
-            pygame.init()
-            pygame.display.init()
-            self.window = pygame.display.set_mode(window_size)
-            pygame.display.set_caption("Search Race")
-
-        if self.clock is None and self.render_mode == "human":
-            self.clock = pygame.time.Clock()
-
-        if self.font is None:
-            pygame.font.init()
-            self.font = pygame.font.SysFont(
-                FONT_NAME,
-                FONT_SIZE // SCALE_FACTOR,
-                bold=True,
-            )
-
-        if self.background_img is None:
-            self._load_background_img()
-
-        if self.car_img is None:
-            self._load_car_img()
-
-        canvas = pygame.Surface(window_size)
-        canvas.blit(self.background_img, (0, 0))
-
-        self._draw_checkpoints(canvas=canvas)
-        self._draw_car(canvas=canvas)
-        self._draw_car_text(canvas=canvas)
-        self._draw_checkpoint_text(canvas=canvas)
-
-        if self.render_mode == "human":
-            self.window.blit(canvas, canvas.get_rect())
-            pygame.event.pump()
-            pygame.display.update()
-            self.clock.tick(self.metadata["render_fps"])
-        else:  # rgb_array
-            return np.transpose(
-                np.array(pygame.surfarray.pixels3d(canvas)),
-                axes=(1, 0, 2),
-            )
-
-    def close(self) -> None:
-        if self.window is not None:
-            pygame.display.quit()
-            pygame.quit()
+  def close(self) -> None:
+    if self.window is not None:
+      pygame.display.quit()
+      pygame.quit()
 
 
 class SearchRaceDiscreteEnv(SearchRaceEnv):
-    def __init__(
-        self,
-        render_mode: str | None = None,
-        laps: int = 3,
-        car_max_thrust: float = 200,
-        test_id: int | None = None,
-        sequential_maps: bool = False,
-        discover_checkpoints: bool = False,
-    ) -> None:
-        super().__init__(
-            render_mode=render_mode,
-            laps=laps,
-            car_max_thrust=car_max_thrust,
-            test_id=test_id,
-            sequential_maps=sequential_maps,
-            discover_checkpoints=discover_checkpoints,
-        )
 
-        self.actions = list(
-            product(
-                list(
-                    range(
-                        -self.max_rotation_per_turn,
-                        self.max_rotation_per_turn + 1,
-                    )
-                ),
-                [0, self.car_max_thrust],
-            )
-        )
-        self.action_space = spaces.Discrete(len(self.actions))
+  def __init__(
+      self,
+      render_mode: str | None = None,
+      laps: int = 3,
+      car_max_thrust: float = 200,
+      test_id: int | None = None,
+      sequential_maps: bool = False,
+      discover_checkpoints: bool = True,
+  ) -> None:
+    super().__init__(
+        render_mode=render_mode,
+        laps=laps,
+        car_max_thrust=car_max_thrust,
+        test_id=test_id,
+        sequential_maps=sequential_maps,
+        discover_checkpoints=discover_checkpoints,
+    )
 
-    def _convert_action_to_angle_thrust(
-        self,
-        action: ActType,
-    ) -> tuple[float, float]:
-        return self.actions[action]
+    self.actions = list(
+        product(
+            list(
+                range(
+                    -self.max_rotation_per_turn,
+                    self.max_rotation_per_turn + 1,
+                )
+            ),
+            [0, self.car_max_thrust],
+        )
+    )
+    self.action_space = spaces.Discrete(len(self.actions))
+
+  def _convert_action_to_angle_thrust(
+      self,
+      action: ActType,
+  ) -> tuple[float, float]:
+    return self.actions[action]

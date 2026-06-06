@@ -1,0 +1,14 @@
+{
+  "current_iteration": 22,
+  "active_experiment": {
+    "xid": "258751226",
+    "xids_url": "http://xids/258751226",
+    "status": "RUNNING",
+    "profile": "Iteration_22_DiscretePivot_NonUniformGrid39Actions_and_MomentumBraking15Actions",
+    "config_under_test": "Iter22_DiscretePivot_39Actions_Braking15Actions_GAE_Gamma_Sweeps",
+    "launched_at": "2026-05-29T05:16:00Z",
+    "resource_alloc": "group:ads/ads-xm-users"
+  },
+  "sweeps_file": "experimental/users/yangliyl/gym_search_race/sweeps.json",
+  "results_file": "experimental/users/yangliyl/gym_search_race/hparams_results.md"
+}

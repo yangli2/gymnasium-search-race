@@ -1,1 +1,2 @@
-include src/gymnasium_search_race/envs/assets/* src/gymnasium_search_race/envs/maps/*
+recursive-include src/gymnasium_search_race/envs/assets *
+recursive-include src/gymnasium_search_race/envs/maps *
